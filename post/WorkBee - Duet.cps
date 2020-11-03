@@ -6,19 +6,16 @@
 // Changes compared to Ooznest's processor:
 // - Cleanup of unused code
 // - Tool change prompts
-// - Z probing during tool change
+// - Z probing during tool change, selectable between manual and probe tool
 // - Helical moves using G2/G3
 // - maxCircularSweep 360 degrees
-// - Move comments in the G-code
+// - Add comments showing the router move in the G-code
 // - Set feed only at beginning of move
-
+// - Show router specific RPM settings for Makita and DeWalt routerss
 //
 // Todo:
-// - Probing selectable between manual Z probing and probe tool
-// - DeWalt RPM scale
-// - DeWalt/Makita/None selectable
-// - Optimize by not outputting coordinates if they don't change from previous move
 // - Implement onCommand() commands 
+// - Optional XY probing, manual and auto
 
 // PostProcessor attributes
 description = "WorkBee - Duet";
@@ -44,28 +41,56 @@ allowHelicalMoves = true;
 allowSpiralMoves = false;
 allowedCircularPlanes = (1 << PLANE_XY) 
 
+
+const NO_ROUTER = "Do not show";
+
 // user-defined properties
 properties = {
-  writeMachine: true, // write machine
   showSequenceNumbers: false, // show sequence numbers
   sequenceNumberStart: 10, // first sequence number
-  sequenceNumberIncrement: 1, // increment for sequence numbers
-  separateWordsWithSpace: true, // specifies that the words should be separated with a white space
-  toolChangePrompt: true
+  toolChangePrompt: true,
+  useProbingTool: false,
+  routerRPM: NO_ROUTER
 };
+
 
 // user-defined property definitions
 propertyDefinitions = {
-  writeMachine: {title:"Write machine", description:"Output the machine settings in the header of the code.", group:0, type:"boolean"},
-  showSequenceNumbers: {title:"Use sequence numbers", description:"Use sequence numbers for each block of outputted code.", group:1, type:"boolean"},
-  sequenceNumberStart: {title:"Start sequence number", description:"The number at which to start the sequence numbers.", group:1, type:"integer"},
-  sequenceNumberIncrement: {title:"Sequence number increment", description:"The amount by which the sequence number is incremented by in each block.", group:1, type:"integer"},
-  separateWordsWithSpace: {title:"Separate words with space", description:"Adds spaces between words if 'yes' is selected.", type:"boolean"},
-  toolChangePrompt: {title:"Prompt for tool change", descriptions:"Prompts to change tool and probe between operations if the tool changes", type:"boolean"}
+  showSequenceNumbers: {
+    title: "Use sequence numbers",
+    description: "Use sequence numbers for each block of outputted code.",
+    group: 1,
+    type:"boolean"
+  },
+  sequenceNumberStart:
+    {title: "Start sequence number",
+    description: "The number at which to start the sequence numbers.",
+    group: 1,
+    type: "integer"
+  },
+  toolChangePrompt: {
+    title: "Prompt for tool change",
+    description: "Prompts to change tool and probe between operations if the tool changes",
+    type: "boolean"
+  },
+  useProbingTool: { 
+    title: "Use probing tool",
+    description: "Use a probing tool to automatically probe for Z-origin during tool change, else manual probing will be performed.",
+    type: "boolean"
+  },
+  routerRPM: {
+    title: "Show router RPM dial setting",
+    description: "On tool change, in addition to showing RPM values show the router specific setting",
+    type: "enum",
+    values: [NO_ROUTER, "Makita", "DeWalt"]
+  }
 };
+
+
 
 var gFormat = createFormat({prefix:"G", decimals:0});
 var mFormat = createFormat({prefix:"M", decimals:0});
+var iFormat = createFormat({decimals:0});
 
 var xyzFormat = createFormat({decimals:(unit == MM ? 3 : 4), trim:false});
 var feedFormat = createFormat({decimals:(unit == MM ? 1 : 2)});
@@ -75,6 +100,7 @@ var xOutput = createVariable({prefix:"X", force:true}, xyzFormat);
 var yOutput = createVariable({prefix:"Y", force:true}, xyzFormat);
 var zOutput = createVariable({prefix:"Z", force:true}, xyzFormat);
 var feedOutput = createVariable({prefix:"F", force:false}, feedFormat);
+var pParam = createVariable({prefix:"P", force:true}, iFormat);
 
 // circular output
 var iOutput = createReferenceVariable({prefix:"I", force:true}, xyzFormat);
@@ -87,54 +113,71 @@ var gUnitModal = createModal({}, gFormat); // modal group 6 // G20-21
 // collected state
 var sequenceNumber;
 
-const makitaSpeeds = [
-  10000.0,
-  12000.0,
-  17000.0,
-  22000.0,
-  27000.0,
-  30000.0,
-];
+const routerSpeeds = {
+  "Makita": [
+    10000,
+    12000,
+    17000,
+    22000,
+    27000,
+    30000,
+  ],
+  "DeWalt": [
+    16000,
+    18200,
+    20400,
+    22600,
+    24800,
+    27000  
+  ]
+};
 
 function speedSetting(speed) {
-  if (speed <= makitaSpeeds[0]) {
+  if (properties.routerRPM == NO_ROUTER) {
+    return undefined;
+  }
+  rSpeeds = routerSpeeds[properties.routerRPM];
+  if (speed <= rSpeeds[0]) {
     return 1;
   }
-  const highestSetting = makitaSpeeds.length
-  const highestSpeed = makitaSpeeds[highestSetting - 1];
+  const highestSetting = rSpeeds.length
+  const highestSpeed = rSpeeds[highestSetting - 1];
   if (speed >= highestSpeed) {
     return highestSetting;
   }
   for (var i = 1; i < highestSetting; i++) {
-    mSpeed = makitaSpeeds[i]
-    if (mSpeed >= speed) {
-      mSetting = (speed - makitaSpeeds[i-1]) / (mSpeed - makitaSpeeds[i-1]) + i;
-      return mSetting;
+    rSpeed = rSpeeds[i]
+    if (rSpeed >= speed) {
+      rSetting = (speed - rSpeeds[i-1]) / (rSpeed - rSpeeds[i-1]) + i;
+      return rSetting;
     }
   }
-  return undefined;
+  return undefined; // never reached
 }
  
 function writeBlock() {
 if (properties.showSequenceNumbers) {
     writeWords2("N" + sequenceNumber, arguments);
-    sequenceNumber += properties.sequenceNumberIncrement;
+    sequenceNumber++;
   } else {
     writeWords(arguments);
   }
 }
 
-function writeComment(text) {
-  var comment = "(" + String(text).replace(/[()]/g, "") + ")";
-  writeln(comment);
+function writeComment(){
+  writeWords(";", arguments);
 }
 
 function onOpen() {
-  if (!properties.separateWordsWithSpace) {
-    setWordSeparator("");
-  }
 
   sequenceNumber = properties.sequenceNumberStart;
+
+  if (hasParameter("generated-at")) {
+    var generatedAt = getParameter("generated-at");
+    if (generatedAt) {
+      writeComment("Generated on " + generatedAt);
+    }
+  }
 
   if (programName) {
     writeComment(programName);
@@ -162,27 +205,33 @@ function onOpen() {
     }
   }
 
-  switch (unit) {
-  case IN:
+  if (unit == IN) {
     error(localize("Please select millimeters as unit when post processing."));
     return;
-  case MM:
-    writeBlock(gUnitModal.format(21));
-    break;
   }
-  // absolute coordinates
-  writeBlock(gAbsIncModal.format(90));
+  writeBlock(gUnitModal.format(21));    // Units in mm
+  writeBlock(gAbsIncModal.format(90));  // absolute coordinates
+
 }
 
 function onComment(message) {
   writeComment(message);
 }
 
+function homeZ() {
+  //writeBlock('M98 P"homez.g"');
+  writeBlock("G91");
+  writeBlock("G1 H1 Z94 F1500");
+  writeBlock("G1 Z-3 F2400");	// go back 3mm
+  writeBlock("G1 H1 Z94 F300");//  move slowly to Z axis endstop
+  writeBlock("G90"); 		// absolute positioning
+}
+
 function onSection() {
   
   var insertToolCall = isFirstSection() ||
     currentSection.getForceToolChange && currentSection.getForceToolChange() ||
-    (tool.number != getPreviousSection().getTool().number);
+    (tool.toolId != getPreviousSection().getTool().toolId);
 
   writeln("");
 
@@ -193,18 +242,54 @@ function onSection() {
     }
   }
 
+
   if (properties.toolChangePrompt && insertToolCall) {
+    homeZ(); // Raise so we can remove dust shoe and insert tool
     var msg = "Insert tool #" + tool.number;
     if (tool.description) {
-      msg += ": " + tool.description.replace('"','""')
+      toolDesc = tool.description.replace('"','""')
+      msg += ": " + toolDesc;
+      toolName = 'S"' + toolDesc + '"';
+    } else {
+      toolName = 'S"Unnamed"';
     }
-    msg += ". Set router to " + tool.getSpindleRPM() + " RPM";
-    msg += ". Makita " + speedSetting(tool.getSpindleRPM()).toFixed(1);
-    msg += ". Jog to Z probe position."
+    if (properties.useProbingTool) {
+      msg += ". Connect the probe."
+      writeBlock("M291", 'P"' + msg + '"', "S3");
+      msg = "Probe connected? Move the tool over the probe plate to probe the " +
+      "workplane's Z origin. Press OK to start probing.";
+    } else {
+      msg += ". Move the tool tip so that it touches the workplane's Z origin.";
+    }
     writeBlock("M291", 'P"' + msg + '"', "S3", "X1", "Y1", "Z1");
-    writeBlock("G30");
+    writeBlock("M563", pParam.format(tool.number), toolName);  // Define tool
+    writeBlock("T" + tool.number); // Select tool
+    if (properties.useProbingTool) {
+      writeBlock("M585 Z15 E3 L0 F500 S1");
+      // Z15  Expected distance 15mm
+      // E3   Endstop 3
+      // L0   Trigger leve active low
+      // F500 Feedrate 500mm/min
+      // S1   Move probe towards axis minimum
+      writeBlock("G10 L20 Z5"); // Set workplane Z offset 5mm above tool position 
+    } else {
+      writeBlock("G10 L20 Z0"); // Set workplane Z offset to tool position 
+    }
+    homeZ(); // Raise so we can put on dust shoe
+    msg = "";
+    if (properties.useProbingTool) {
+      msg = "Remove the probe tool. "
+    }
+    msg += "Set router to " + tool.getSpindleRPM() + " RPM";
+    if (properties.routerRPM != NO_ROUTER) {
+     msg += ", " + properties.routerRPM + " " + speedSetting(tool.getSpindleRPM()).toFixed(1);
+    }
+    msg += ". Start the router. Routing will start when you press OK."
+    writeBlock("M291", 'P"' + msg + '"', "S3");
   }
+}
 
+function onSectionEnd() {
 }
 
 function onDwell(seconds) {
@@ -283,10 +368,9 @@ function onCommand(command) {
   }
 }
 
-function onSectionEnd() {
-}
-
 function onClose() {
+  //writeBlock("T-1"); // Remove tool
+  homeZ();
 }
 
 function onMovement(movement) {

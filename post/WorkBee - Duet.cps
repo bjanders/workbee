@@ -10,12 +10,16 @@
 // - Helical moves using G2/G3
 // - maxCircularSweep 360 degrees
 // - Add comments showing the router move in the G-code
-// - Set feed only at beginning of move
-// - Show router specific RPM settings for Makita and DeWalt routerss
+// - Output X, Y and F only when they change in G0/G1 commands
+// - Show router specific RPM settings for Makita and DeWalt routers
+// - Support lasers ("Jets" in Fusion)
 //
 // Todo:
 // - Implement onCommand() commands 
 // - Optional XY probing, manual and auto
+// - Probing plate offset
+// - Maybe simulate normal ends mills for lasers, so that all toolpaths can be
+//   used with lasers (in addition to the normal "Jets")
 
 // PostProcessor attributes
 description = "WorkBee - Duet";
@@ -29,7 +33,7 @@ minimumRevision = 24000;
 extension = "nc";
 setCodePage("ascii");
 
-capabilities = CAPABILITY_MILLING;
+capabilities = CAPABILITY_MILLING | CAPABILITY_JET;
 tolerance = spatial(0.002, MM);
 
 minimumChordLength = spatial(0.25, MM);
@@ -43,14 +47,15 @@ allowedCircularPlanes = (1 << PLANE_XY)
 
 
 const NO_ROUTER = "Do not show";
+const SEQUENCE_NUMBER_START = 1;
 
 // user-defined properties
 properties = {
   showSequenceNumbers: false, // show sequence numbers
-  sequenceNumberStart: 10, // first sequence number
   toolChangePrompt: true,
   useProbingTool: false,
   routerRPM: NO_ROUTER
+  // laserMode: false
 };
 
 
@@ -61,12 +66,6 @@ propertyDefinitions = {
     description: "Use sequence numbers for each block of outputted code.",
     group: 1,
     type:"boolean"
-  },
-  sequenceNumberStart:
-    {title: "Start sequence number",
-    description: "The number at which to start the sequence numbers.",
-    group: 1,
-    type: "integer"
   },
   toolChangePrompt: {
     title: "Prompt for tool change",
@@ -84,34 +83,42 @@ propertyDefinitions = {
     type: "enum",
     values: [NO_ROUTER, "Makita", "DeWalt"]
   }
+  // laserMode: {
+  //   title: "Enable laser mode",
+  //   description: "Enable laser mode",
+  //   type: "boolean"
+  // }
 };
 
 
 
-var gFormat = createFormat({prefix:"G", decimals:0});
-var mFormat = createFormat({prefix:"M", decimals:0});
-var iFormat = createFormat({decimals:0});
+var gFormat = createFormat({prefix: "G", decimals: 0});
+var mFormat = createFormat({prefix: "M", decimals: 0});
+var iFormat = createFormat({decimals: 0});
 
-var xyzFormat = createFormat({decimals:(unit == MM ? 3 : 4), trim:false});
-var feedFormat = createFormat({decimals:(unit == MM ? 1 : 2)});
-var secFormat = createFormat({decimals:3, forceDecimal:true}); // seconds - range 0.001-1000
+var xyzFormat = createFormat({decimals: 3, trim: false});
+var feedFormat = createFormat({decimals: 1 });
+var speedFormat = createFormat({decimals: 0});
+var secFormat = createFormat({decimals:3, forceDecimal: true}); // seconds - range 0.001-1000
 
-var xOutput = createVariable({prefix:"X", force:true}, xyzFormat);
-var yOutput = createVariable({prefix:"Y", force:true}, xyzFormat);
-var zOutput = createVariable({prefix:"Z", force:true}, xyzFormat);
-var feedOutput = createVariable({prefix:"F", force:false}, feedFormat);
-var pParam = createVariable({prefix:"P", force:true}, iFormat);
+var xOutput = createVariable({prefix: "X", force: false}, xyzFormat);
+var yOutput = createVariable({prefix: "Y", force: false}, xyzFormat);
+var zOutput = createVariable({prefix: "Z", force: false}, xyzFormat);
+var feedOutput = createVariable({prefix: "F", force: false}, feedFormat);
+var speedOutput = createVariable({prefix: "S", force: true}, speedFormat);
+var pParam = createVariable({prefix: "P", force: true}, iFormat);
 
 // circular output
-var iOutput = createReferenceVariable({prefix:"I", force:true}, xyzFormat);
-var jOutput = createReferenceVariable({prefix:"J", force:true}, xyzFormat);
+var iOutput = createReferenceVariable({prefix: "I", force: true}, xyzFormat);
+var jOutput = createReferenceVariable({prefix: "J", force: true}, xyzFormat);
 
-var gMotionModal = createModal({force:true}, gFormat); // modal group 1 // G0-G3, ...
+var gMotionModal = createModal({force: true}, gFormat); // modal group 1 // G0-G3, ...
 var gAbsIncModal = createModal({}, gFormat); // modal group 3 // G90-91
 var gUnitModal = createModal({}, gFormat); // modal group 6 // G20-21
 
 // collected state
 var sequenceNumber;
+var previousMovement = null;
 
 const routerSpeeds = {
   "Makita": [
@@ -170,47 +177,40 @@ function writeComment(){
 
 function onOpen() {
 
-  sequenceNumber = properties.sequenceNumberStart;
-
-  if (hasParameter("generated-at")) {
-    var generatedAt = getParameter("generated-at");
-    if (generatedAt) {
-      writeComment("Generated on " + generatedAt);
-    }
-  }
-
-  if (programName) {
-    writeComment(programName);
-  }
-  if (programComment) {
-    writeComment(programComment);
-  }
-
-  if (properties.writeMachine) {
-    // dump machine configuration
-    var vendor = machineConfiguration.getVendor();
-    var model = machineConfiguration.getModel();
-    var description = machineConfiguration.getDescription();
-    if (vendor || model || description) {
-      writeComment(localize("Machine"));
-    }
-    if (vendor) {
-      writeComment("  " + localize("vendor") + ": " + vendor);
-    }
-    if (model) {
-      writeComment("  " + localize("model") + ": " + model);
-    }
-    if (description) {
-      writeComment("  " + localize("description") + ": "  + description);
-    }
-  }
-
   if (unit == IN) {
     error(localize("Please select millimeters as unit when post processing."));
     return;
   }
+
+  sequenceNumber = SEQUENCE_NUMBER_START;
+  if (hasGlobalParameter("document-path")){
+    writeComment("Document: ", getGlobalParameter("document-path"));
+  }
+
+  if (programName) {
+    writeComment("Program name:", programName);
+  }
+  if (programComment) {
+    writeComment("Comment: ", programComment);
+  }
+
+  var d = new Date();
+  writeComment("Created at:", d.toISOString());
+  writeln("");
+
   writeBlock(gUnitModal.format(21));    // Units in mm
   writeBlock(gAbsIncModal.format(90));  // absolute coordinates
+
+  if (isJet()) {
+    properties.toolChangePrompt = false;
+    writeComment("Enable laser mode");
+    writeBlock("M307 H3 A-1 C-1 D-1"); // Disable heater on E3
+    writeBlock("M452 P3"); // Enable laser mode on E3
+  } else {
+    writeComment("Enable CNC mode");
+    writeBlock("M453")
+    speedOutput.disable()
+  }
 
 }
 
@@ -219,7 +219,7 @@ function onComment(message) {
 }
 
 function homeZ() {
-  //writeBlock('M98 P"homez.g"');
+  writeComment("Home Z");
   writeBlock("G91");
   writeBlock("G1 H1 Z94 F1500");
   writeBlock("G1 Z-3 F2400");	// go back 3mm
@@ -320,8 +320,14 @@ function onLinear(_x, _y, _z, feed) {
   var y = yOutput.format(_y);
   var z = zOutput.format(_z);
   var f = feedOutput.format(feed);
+  var s;
+  if (power) {
+    s = speedOutput.format(255);
+   } else {
+    s = speedOutput.format(0);
+  }
   if (x || y || z) {
-      writeBlock(gMotionModal.format(1), x, y, z, f);
+      writeBlock(gMotionModal.format(1), x, y, z, f, s);
   } else if (f) {
     if (getNextRecord().isMotion()) { // try not to output feed without motion
       feedOutput.reset(); // force feed on next line
@@ -333,7 +339,22 @@ function onLinear(_x, _y, _z, feed) {
 
 function onCircular(clockwise, cx, cy, cz, x, y, z, feed) {
   var start = getCurrentPosition();
-  writeBlock(gMotionModal.format(clockwise ? 2 : 3), xOutput.format(x), yOutput.format(y), zOutput.format(z), iOutput.format(cx - start.x, 0), jOutput.format(cy - start.y, 0), feedOutput.format(feed));
+  var s;
+  xOutput.reset();
+  yOutput.reset();
+  if (power == true) {
+    s = speedOutput.format(255);
+   } else {
+    s = speedOutput.format(0);
+  }
+  writeBlock(gMotionModal.format(clockwise ? 2 : 3),
+    xOutput.format(x),
+    yOutput.format(y),
+    zOutput.format(z),
+    iOutput.format(cx - start.x, 0),
+    jOutput.format(cy - start.y, 0),
+    feedOutput.format(feed),
+    s);
 }
 
 var mapCommand = {
@@ -346,27 +367,56 @@ var mapCommand = {
 
 function onCommand(command) {
   switch (command) {
-  case COMMAND_START_SPINDLE:
-    onCommand(tool.clockwise ? COMMAND_SPINDLE_CLOCKWISE : COMMAND_SPINDLE_COUNTERCLOCKWISE);
-    return;
-  case COMMAND_LOCK_MULTI_AXIS:
-    return;
-  case COMMAND_UNLOCK_MULTI_AXIS:
-    return;
-  case COMMAND_BREAK_CONTROL:
-    return;
-  case COMMAND_TOOL_MEASURE:
-    return;
-  }
+    case COMMAND_STOP:          // Program stop (M00)
+    case COMMAND_OPTIONAL_STOP: // Optional program stop (M01)
+    case COMMAND_END:           // Program end (M02)
+    case COMMAND_SPINDLE_CLOCKWISE: // Clockwise spindle direction (M03)
+    case COMMAND_SPINDLE_COUNTERCLOCKWISE: // Counterclockwise spindle direction (M04)
+      writeBlock(mFormat.format(mapCommand[command]));
+      return;
+    case COMMAND_START_SPINDLE: // Start spindle M03 (clockwise) or M04 (counterclockwise)
+      onCommand(tool.clockwise ? COMMAND_SPINDLE_CLOCKWISE : COMMAND_SPINDLE_COUNTERCLOCKWISE);
+      return;
+    case COMMAND_STOP_SPINDLE: //  Stop spindle (M05)
+      writeBlock(mFormat.format(mapCommand[command]));
+      return;
 
-  var stringId = getCommandStringId(command);
-  var mcode = mapCommand[stringId];
-  if (mcode != undefined) {
-    writeBlock(mFormat.format(mcode));
-  } else {
-    onUnsupportedCommand(command);
-  }
-}
+    case COMMAND_ORIENTATE_SPINDLE: // Orientate spindle - +X direction by default (M19)
+    case COMMAND_LOAD_TOOL: // Tool change (M06)
+    case COMMAND_COOLANT_ON: // Coolant on (M08)
+    case COMMAND_COOLANT_OFF: // Coolant off (M09)
+    case COMMAND_ACTIVATE_SPEED_FEED_SYNCHRONIZATION: // Active feed-speed synchronization
+    case COMMAND_DEACTIVATE_SPEED_FEED_SYNCHRONIZATION: // Deactive feed-speed synchronization
+    case COMMAND_LOCK_MULTI_AXIS: // Locks the 4th and 5th axes
+    case COMMAND_UNLOCK_MULTI_AXIS: // Unlocks the 4th and 5th axes
+    case COMMAND_EXACT_STOP: // Exact stop
+    case COMMAND_START_CHIP_TRANSPORT: // Close chip transport
+    case COMMAND_STOP_CHIP_TRANSPORT: // Stop chip transport
+    case COMMAND_OPEN_DOOR: // Open primary door
+    case COMMAND_CLOSE_DOOR: // Close primary door
+    case COMMAND_BREAK_CONTROL: // Break control
+    case COMMAND_TOOL_MEASURE: // Measure tool
+    case COMMAND_CALIBRATE: // Run calibration cycle
+    case COMMAND_VERIFY: // Verify part/tool/machine integrity
+    case COMMAND_CLEAN: // Run cleaning cycle
+    case COMMAND_ALARM: // Alarm
+    case COMMAND_ALERT: // Alert
+    case COMMAND_CHANGE_PALLET: // Change pallet
+    case COMMAND_POWER_ON: // Power on
+    case COMMAND_POWER_OFF: // Power off
+    case COMMAND_MAIN_CHUCK_OPEN: // Open main chuck
+    case COMMAND_MAIN_CHUCK_CLOSE: // Close main chuck
+    case COMMAND_SECONDARY_CHUCK_OPEN: // Open secondary chuck
+    case COMMAND_SECONDARY_CHUCK_CLOSE: // Close secondary chuck
+    case COMMAND_SECONDARY_SPINDLE_SYNCHRONIZATION_ACTIVATE: // Activate spindle synchronization
+    case COMMAND_SECONDARY_SPINDLE_SYNCHRONIZATION_DEACTIVATE: // Deactivate spindle synchronization
+    case COMMAND_SYNC_CHANNEL: // Sync channels
+    case COMMAND_PROBE_ON: // Probe on
+    case COMMAND_PROBE_OFF: // Probe off
+      return;
+    };
+};
+//    onUnsupportedCommand(command);
 
 function onClose() {
   //writeBlock("T-1"); // Remove tool
@@ -374,7 +424,6 @@ function onClose() {
 }
 
 function onMovement(movement) {
-  feedOutput.reset();
   switch(movement) {
     case MOVEMENT_RAPID: s = "Rapid"; break;
     case MOVEMENT_LEAD_IN: s = "Lead in"; break;

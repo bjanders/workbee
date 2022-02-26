@@ -198,17 +198,15 @@ function onOpen() {
   writeComment("Created at:", d.toISOString());
   writeln("");
 
-  writeBlock(gUnitModal.format(21));    // Units in mm
-  writeBlock(gAbsIncModal.format(90));  // absolute coordinates
+  writeBlock(gUnitModal.format(21), "; Units in mm");
+  writeBlock(gAbsIncModal.format(90), "; Absolute coordinates");
 
   if (isJet()) {
     properties.toolChangePrompt = false;
-    writeComment("Enable laser mode");
-    writeBlock("M307 H3 A-1 C-1 D-1"); // Disable heater on E3
-    writeBlock("M452 P3"); // Enable laser mode on E3
+    writeBlock("M307 H3 A-1 C-1 D-1 ; Disable heater on E3");
+    writeBlock("M452 P3             ; Enable laser mode on E3");
   } else {
-    writeComment("Enable CNC mode");
-    writeBlock("M453")
+    writeBlock("M453 ; Enable CNC mode")
     speedOutput.disable()
   }
 
@@ -220,11 +218,11 @@ function onComment(message) {
 
 function homeZ() {
   writeComment("Home Z");
-  writeBlock("G91");
-  writeBlock("G1 H1 Z94 F1500");
-  writeBlock("G1 Z-3 F2400");	// go back 3mm
-  writeBlock("G1 H1 Z94 F300");//  move slowly to Z axis endstop
-  writeBlock("G90"); 		// absolute positioning
+  writeBlock("G91             ; Relative positioning");
+  writeBlock("G1 H1 Z94 F1500 ; Go to Z endstop");
+  writeBlock("G1 Z-3 F2400    ; Go back 3mm");
+  writeBlock("G1 H1 Z94 F300  ; Move slowly to Z axis endstop");  
+  writeBlock("G90             ; Absolute positioning"); 		
 }
 
 function onSection() {
@@ -238,7 +236,7 @@ function onSection() {
   if (hasParameter("operation-comment")) {
     var comment = getParameter("operation-comment");
     if (comment) {
-      writeComment(comment);
+      writeComment("Operation", comment);
     }
   }
 
@@ -255,15 +253,20 @@ function onSection() {
     }
     if (properties.useProbingTool) {
       msg += ". Connect the probe."
-      writeBlock("M291", 'P"' + msg + '"', "S3");
+      writeBlock("M291", 'P"' + msg + '"', "S3", "X1", "Y1", "Z1");
       msg = "Probe connected? Move the tool over the probe plate to probe the " +
       "workplane's Z origin. Press OK to start probing.";
     } else {
       msg += ". Move the tool tip so that it touches the workplane's Z origin.";
     }
     writeBlock("M291", 'P"' + msg + '"', "S3", "X1", "Y1", "Z1");
-    writeBlock("M563", pParam.format(tool.number), toolName);  // Define tool
-    writeBlock("T" + tool.number); // Select tool
+    if (tool.number > 999) {
+      toolnr = 999;
+    } else {
+      toolnr = tool.number;
+    }
+    writeBlock("M563", pParam.format(toolnr), toolName);  // Define tool
+    writeBlock("T" + toolnr); // Select tool
     if (properties.useProbingTool) {
       writeBlock("M585 Z15 E3 L0 F500 S1");
       // Z15  Expected distance 15mm

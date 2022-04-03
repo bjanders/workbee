@@ -216,12 +216,7 @@ function onComment(message) {
 }
 
 function homeZ() {
-  writeComment("Home Z");
-  writeBlock("G91                               ; Relative positioning");
-  writeBlock("G1 H1 Z{move.axes[2].max*2} F1500 ; Go to Z endstop");
-  writeBlock("G1 Z-3 F2400                      ; Go back 3mm");
-  writeBlock("G1 H1 Z{move.axes[2].max*2} F300  ; Move slowly to Z axis endstop");
-  writeBlock("G90                               ; Absolute positioning");
+  writeBlock("G53 G0 Z{move.axes[2].max-1} ; Raise Z")
 }
 
 function onSection() {
@@ -245,9 +240,6 @@ function onSection() {
     if (tool.description) {
       toolDesc = tool.description.replace('"','""')
       msg += ": " + toolDesc;
-      toolName = 'S"' + toolDesc + '"';
-    } else {
-      toolName = 'S"Unnamed"';
     }
     if (properties.useProbingTool) {
       msg += ". Connect the probe."
@@ -258,21 +250,11 @@ function onSection() {
       msg += ". Move the tool tip so that it touches the workplane's Z origin.";
     }
     writeBlock("M291", 'P"' + msg + '"', "S3", "X1", "Y1", "Z1");
-    if (tool.number > 999) {
-      toolnr = 999;
-    } else {
-      toolnr = tool.number;
-    }
-    writeBlock("M563", pParam.format(toolnr), toolName);  // Define tool
-    writeBlock("T" + toolnr); // Select tool
     if (properties.useProbingTool) {
-      writeBlock("M585 Z15 F500 S1");
-      // Z15  Expected distance 15mm
-      // F500 Feedrate 500mm/min
-      // S1   Move probe towards axis minimum
-      writeBlock("G10 L20 Z5"); // Set workplane Z offset 5mm above tool position
+      writeBlock("G53 G38.2 Z{move.axes[2].min}  ; Probe towards Z min"); 
+      writeBlock("G10 L20 Z5                     ; Set workplane at 5mm");
     } else {
-      writeBlock("G10 L20 Z0"); // Set workplane Z offset to tool position
+      writeBlock("G10 L20 Z0 ; Set workplane at 0mm"); 
     }
     homeZ(); // Raise so we can put on dust shoe
     msg = "";

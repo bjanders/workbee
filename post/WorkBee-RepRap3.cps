@@ -29,7 +29,6 @@ vendorUrl = "https://ooznest.co.uk/";
 legal = "";
 certificationLevel = 2;
 minimumRevision = 24000;
-version = "1.2"
 extension = "nc";
 setCodePage("ascii");
 
@@ -229,15 +228,10 @@ function onComment(comment) {
   writeComment(comment);
 }
 
-<<<<<<< HEAD
-function homeZ() {
-  writeBlock("G53 G0 Z{move.axes[2].max-1} ; Raise Z")
-=======
 function raiseZ() {
   writeComment("Raise Z");
   writeBlock("G90                               ; Absolute positioning");
   writeBlock("G53 G0 Z{move.axes[2].max-1}      ; Top pos - 1mm");
->>>>>>> fa13b77 (Cleanup)
 }
 
 // onSection() is invoked at the start of a section. A section commonly
@@ -279,17 +273,14 @@ function onSection() {
       msg += ". Move the tool tip so that it touches the workplane's Z origin.";
     }
     writeBlock("M291", 'P"' + msg + '"', "S3", "X1", "Y1", "Z1");
-<<<<<<< HEAD
-=======
 
     // FIX: Ensure that a tool has been selected, but don't override/overwrite
     // the current one
->>>>>>> fa13b77 (Cleanup)
     if (properties.useProbingTool) {
-      writeBlock("G53 G38.2 Z{move.axes[2].min}  ; Probe towards Z min"); 
+      writeBlock("G53 G38.2 Z{move.axes[2].min}  ; Probe towards Z min");
       writeBlock("G10 L20 Z5                     ; Set workplane at 5mm");
     } else {
-      writeBlock("G10 L20 Z0 ; Set workplane at 0mm"); 
+      writeBlock("G10 L20 Z0 ; Set workplane at 0mm");
     }
     raiseZ(); // Raise so we can put on dust shoe
     msg = "";

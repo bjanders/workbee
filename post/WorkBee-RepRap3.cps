@@ -241,9 +241,9 @@ function raiseZ() {
 //
 function onSection() {
 
-  var insertToolCall = isFirstSection() ||
-    currentSection.getForceToolChange && currentSection.getForceToolChange() ||
-    (tool.toolId != getPreviousSection().getTool().toolId);
+  // var insertToolCall = isFirstSection() ||
+  //   currentSection.getForceToolChange && currentSection.getForceToolChange() ||
+  //   (tool.toolId != getPreviousSection().getTool().toolId);
 
   writeln("");
 
@@ -253,47 +253,47 @@ function onSection() {
       writeComment("Operation", comment);
     }
   }
-  if (tool.description) {
-    writeComment("Tool: #" + tool.Number + " " + tool.description);
-  }
+  // if (tool.description) {
+  //   writeComment("Tool: #" + tool.Number + " " + tool.description);
+  // }
 
-  if (properties.toolChangePrompt && insertToolCall) {
-    raiseZ(); // Raise so we can remove dust shoe and insert tool
-    var msg = "Insert tool #" + tool.number;
-    if (tool.description) {
-      toolDesc = tool.description.replace('"','""');
-      msg += ": " + toolDesc;
-    }
-    if (properties.useProbingTool) {
-      msg += ". Connect the probe."
-      writeBlock("M291", 'P"' + msg + '"', "S3", "X1", "Y1", "Z1");
-      msg = "Probe connected? Move the tool over the probe plate to probe the " +
-      "workplane's Z origin. Press OK to start probing.";
-    } else {
-      msg += ". Move the tool tip so that it touches the workplane's Z origin.";
-    }
-    writeBlock("M291", 'P"' + msg + '"', "S3", "X1", "Y1", "Z1");
+  // if (properties.toolChangePrompt && insertToolCall) {
+  //   raiseZ(); // Raise so we can remove dust shoe and insert tool
+  //   var msg = "Insert tool #" + tool.number;
+  //   if (tool.description) {
+  //     toolDesc = tool.description.replace('"','""');
+  //     msg += ": " + toolDesc;
+  //   }
+  //   if (properties.useProbingTool) {
+  //     msg += ". Connect the probe."
+  //     writeBlock("M291", 'P"' + msg + '"', "S3", "X1", "Y1", "Z1");
+  //     msg = "Probe connected? Move the tool over the probe plate to probe the " +
+  //     "workplane's Z origin. Press OK to start probing.";
+  //   } else {
+  //     msg += ". Move the tool tip so that it touches the workplane's Z origin.";
+  //   }
+  //   writeBlock("M291", 'P"' + msg + '"', "S3", "X1", "Y1", "Z1");
 
-    // FIX: Ensure that a tool has been selected, but don't override/overwrite
-    // the current one
-    if (properties.useProbingTool) {
-      writeBlock("G53 G38.2 Z{move.axes[2].min}  ; Probe towards Z min");
-      writeBlock("G10 L20 Z5                     ; Set workplane at 5mm");
-    } else {
-      writeBlock("G10 L20 Z0 ; Set workplane at 0mm");
-    }
-    raiseZ(); // Raise so we can put on dust shoe
-    msg = "";
-    if (properties.useProbingTool) {
-      msg = "Remove the probe tool. "
-    }
-    msg += "Set router to " + tool.getSpindleRPM() + " RPM";
-    if (properties.routerRPM != NO_ROUTER) {
-     msg += ", " + properties.routerRPM + " " + speedSetting(tool.getSpindleRPM()).toFixed(1);
-    }
-    msg += ". Start the router. Routing will start when you press OK."
-    writeBlock("M291", 'P"' + msg + '"', "S3");
-  }
+  //   // FIX: Ensure that a tool has been selected, but don't override/overwrite
+  //   // the current one
+  //   if (properties.useProbingTool) {
+  //     writeBlock("G53 G38.2 Z{move.axes[2].min}  ; Probe towards Z min");
+  //     writeBlock("G10 L20 Z5                     ; Set workplane at 5mm");
+  //   } else {
+  //     writeBlock("G10 L20 Z0 ; Set workplane at 0mm");
+  //   }
+  //   raiseZ(); // Raise so we can put on dust shoe
+  //   msg = "";
+  //   if (properties.useProbingTool) {
+  //     msg = "Remove the probe tool. "
+  //   }
+  //   msg += "Set router to " + tool.getSpindleRPM() + " RPM";
+  //   if (properties.routerRPM != NO_ROUTER) {
+  //    msg += ", " + properties.routerRPM + " " + speedSetting(tool.getSpindleRPM()).toFixed(1);
+  //   }
+  //   msg += ". Start the router. Routing will start when you press OK."
+  //   writeBlock("M291", 'P"' + msg + '"', "S3");
+  // }
   writeBlock("M3", "S" + tool.getSpindleRPM());
 }
 
@@ -497,10 +497,10 @@ function onCommand(command) {
     case COMMAND_END:           // Program end (M2)
     case COMMAND_SPINDLE_CLOCKWISE: // Clockwise spindle direction (M3)
     case COMMAND_SPINDLE_COUNTERCLOCKWISE: // Counterclockwise spindle direction (M4)
-      writeBlock(mFormat.format(mapCommand[command]), "S"+tool.getSpindleRPM());
+      // writeBlock(mFormat.format(mapCommand[command]), "S"+tool.getSpindleRPM());
       return;
     case COMMAND_START_SPINDLE: // Start spindle M3 (clockwise) or M4 (counterclockwise)
-      onCommand(tool.clockwise ? COMMAND_SPINDLE_CLOCKWISE : COMMAND_SPINDLE_COUNTERCLOCKWISE);
+      // onCommand(tool.clockwise ? COMMAND_SPINDLE_CLOCKWISE : COMMAND_SPINDLE_COUNTERCLOCKWISE);
       return;
     case COMMAND_STOP_SPINDLE: //  Stop spindle (M5)
       writeBlock("M5");
